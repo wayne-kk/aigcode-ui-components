@@ -1,0 +1,12 @@
+src/
+*.tsx
+*.ts
+!dist/
+rollup.config.js
+tsconfig.json
+.storybook/
+stories/
+**/*.stories.*
+**/*.test.*
+node_modules/
+.git/ 
