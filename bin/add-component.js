@@ -4,7 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
 
-const REPO_URL = 'https://raw.githubusercontent.com/aigcode/ui-components/main'
+const REPO_URL = 'https://raw.githubusercontent.com/wayne-kk/aigcode-ui-components/main'
 
 // 可用的组件列表
 const COMPONENTS = {
@@ -59,7 +59,7 @@ const COMPONENTS = {
     },
     form: {
         files: ['form.tsx'],
-        dependencies: ['@radix-ui/react-label', 'react-hook-form', '@hookform/resolvers', 'clsx', 'tailwind-merge']
+        dependencies: ['@radix-ui/react-label', '@radix-ui/react-slot', 'react-hook-form', '@hookform/resolvers', 'clsx', 'tailwind-merge']
     },
 
     // 导航组件
@@ -105,13 +105,13 @@ const COMPONENTS = {
     },
     calendar: {
         files: ['calendar.tsx', 'button.tsx'],
-        dependencies: ['@radix-ui/react-slot', 'react-day-picker', 'date-fns', 'class-variance-authority', 'clsx', 'tailwind-merge']
+        dependencies: ['@radix-ui/react-slot', 'react-day-picker', 'lucide-react', 'date-fns', 'class-variance-authority', 'clsx', 'tailwind-merge']
     },
 
     // 高级组件
     resizable: {
         files: ['resizable.tsx'],
-        dependencies: ['react-resizable-panels', 'clsx', 'tailwind-merge']
+        dependencies: ['react-resizable-panels', 'lucide-react', 'clsx', 'tailwind-merge']
     },
     toggle: {
         files: ['toggle.tsx'],
@@ -124,6 +124,14 @@ const COMPONENTS = {
     popover: {
         files: ['popover.tsx'],
         dependencies: ['@radix-ui/react-popover', 'clsx', 'tailwind-merge']
+    },
+    chart: {
+        files: ['chart.tsx'],
+        dependencies: ['recharts', 'clsx', 'tailwind-merge']
+    },
+    'render-canvas': {
+        files: ['renderCanvas.tsx'],
+        dependencies: ['clsx', 'tailwind-merge']
     }
 }
 
@@ -149,49 +157,67 @@ ${Object.keys(COMPONENTS).map(comp => `  - ${comp}`).join('\n')}
 `)
 }
 
-async function downloadFile(url, filePath) {
-    const https = require('https')
-
-    return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(filePath)
-
-        https.get(url, (response) => {
-            response.pipe(file)
-
-            file.on('finish', () => {
-                file.close()
-                resolve()
+async function downloadFile(url, filePath, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            // 使用 curl 命令下载，更可靠
+            execSync(`curl -L -f --connect-timeout 30 --max-time 60 -o "${filePath}" "${url}"`, {
+                stdio: 'pipe'
             })
 
-            file.on('error', (err) => {
-                fs.unlink(filePath, () => { }) // 删除失败的文件
-                reject(err)
-            })
-        }).on('error', (err) => {
-            reject(err)
-        })
-    })
+            // 检查文件是否存在且不为空
+            if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+                return
+            } else {
+                throw new Error('下载的文件为空或不存在')
+            }
+        } catch (error) {
+            console.log(`⚠️  下载失败 (${i + 1}/${retries}): ${error.message}`)
+
+            // 清理失败的文件
+            if (fs.existsSync(filePath)) {
+                fs.unlink(filePath, () => { })
+            }
+
+            // 如果是最后一次重试，抛出错误
+            if (i === retries - 1) {
+                throw error
+            }
+
+            // 等待一秒后重试
+            await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+    }
 }
 
 async function ensureUtilsFile() {
-    const utilsPath = path.join(process.cwd(), 'lib', 'utils.ts')
-
-    if (!fs.existsSync(utilsPath)) {
-        // 创建 lib 目录
-        const libDir = path.dirname(utilsPath)
-        if (!fs.existsSync(libDir)) {
-            fs.mkdirSync(libDir, { recursive: true })
-        }
-
-        // 创建 utils.ts 文件
-        const utilsContent = `import { type ClassValue, clsx } from "clsx"
+    const utilsContent = `import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 `
-        fs.writeFileSync(utilsPath, utilsContent)
+
+    // 创建 components/ui/utils.ts
+    const uiUtilsPath = path.join(process.cwd(), 'components', 'ui', 'utils.ts')
+    if (!fs.existsSync(uiUtilsPath)) {
+        const uiLibDir = path.dirname(uiUtilsPath)
+        if (!fs.existsSync(uiLibDir)) {
+            fs.mkdirSync(uiLibDir, { recursive: true })
+        }
+        fs.writeFileSync(uiUtilsPath, utilsContent)
+        console.log('✅ 已创建 components/ui/utils.ts')
+    }
+
+    // 创建 lib/utils.ts
+    const libUtilsPath = path.join(process.cwd(), 'lib', 'utils.ts')
+    if (!fs.existsSync(libUtilsPath)) {
+        const libDir = path.dirname(libUtilsPath)
+        if (!fs.existsSync(libDir)) {
+            fs.mkdirSync(libDir, { recursive: true })
+        }
+        fs.writeFileSync(libUtilsPath, utilsContent)
         console.log('✅ 已创建 lib/utils.ts')
     }
 }
@@ -245,7 +271,7 @@ async function addComponent(componentName) {
                 continue
             }
 
-            const fileUrl = `${REPO_URL}/src/${fileName}`
+            const fileUrl = `${REPO_URL}/${fileName}`
             const filePath = path.join(componentsDir, fileName)
 
             console.log(`📥 下载 ${fileName}...`)
@@ -273,10 +299,10 @@ async function addAllComponents() {
     console.log('🚀 开始安装所有组件...\n')
 
     // 创建组件目录
-    const componentsDir = path.join(process.cwd(), 'components', '@ui')
+    const componentsDir = path.join(process.cwd(), 'components', 'ui')
     if (!fs.existsSync(componentsDir)) {
         fs.mkdirSync(componentsDir, { recursive: true })
-        console.log('📁 已创建 components/@ui 目录')
+        console.log('📁 已创建 components/ui 目录')
     }
 
     try {
@@ -294,7 +320,7 @@ async function addAllComponents() {
         // 下载所有组件文件
         let downloadCount = 0
         for (const fileName of allFiles) {
-            const fileUrl = `${REPO_URL}/src/${fileName}`
+            const fileUrl = `${REPO_URL}/${fileName}`
             const filePath = path.join(componentsDir, fileName)
 
             console.log(`📥 (${++downloadCount}/${allFiles.size}) 下载 ${fileName}...`)
